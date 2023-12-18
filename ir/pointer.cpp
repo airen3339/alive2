@@ -559,14 +559,15 @@ Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
 
   for (auto &[ptr_expr, domain] : DisjointExpr<expr>(p, 3)) {
     Pointer ptr(m, ptr_expr);
+    auto [ptr, inboundsd] = Pointer(m, ptr_expr).toLogical()
     auto [ub, aligned] = is_dereferenceable(ptr);
 
     // record pointer if not definitely unfeasible
     if (!ub.isFalse() && !aligned.isFalse() && !ptr.blockSize().isZero())
       all_ptrs.add(std::move(ptr).release(), domain);
 
-    UB.add(std::move(ub), domain);
-    is_aligned.add(std::move(aligned), domain);
+    UB.add(ub && inboundsd, domain);
+    is_aligned.add(std::move(aligned), std::move(domain));
   }
 
   AndExpr exprs;
@@ -880,8 +881,10 @@ Pointer::mkIf(const expr &cond, const Pointer &then, const Pointer &els) {
 }
 
 ostream& operator<<(ostream &os, const Pointer &p) {
+  auto logical = p.isLogical();
+
   if (p.isNull().isTrue())
-    return os << "null";
+    return os << (logical.isFalse() ? "0x0" : "null");
 
 #define P(field, fn)   \
   if (field.isConst()) \
@@ -889,7 +892,6 @@ ostream& operator<<(ostream &os, const Pointer &p) {
   else                 \
     os << field
 
-  auto logical = p.isLogical();
   os << (logical.isFalse() ? "phy-ptr(" : "pointer(");
 
   if (!logical.isFalse()) {
