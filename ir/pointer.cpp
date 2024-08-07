@@ -558,8 +558,7 @@ Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
   DisjointExpr<expr> UB(expr(false)), is_aligned(expr(false)), all_ptrs;
 
   for (auto &[ptr_expr, domain] : DisjointExpr<expr>(p, 3)) {
-    Pointer ptr(m, ptr_expr);
-    auto [ptr, inboundsd] = Pointer(m, ptr_expr).toLogical()
+    auto [ptr, inboundsd] = Pointer(m, ptr_expr).toLogical();
     auto [ub, aligned] = is_dereferenceable(ptr);
 
     // record pointer if not definitely unfeasible
@@ -799,8 +798,8 @@ expr Pointer::isNull() const {
 bool Pointer::isBlkSingleByte() const {
   uint64_t blk_size;
   return blockSize().isUInt(blk_size) && blk_size == bits_byte/8;
+}
 
-Pointer Pointer::toLogical() const {
 pair<Pointer, expr> Pointer::findLogicalPointer(const expr &addr) const {
   DisjointExpr<Pointer> ret;
   expr val = addr.zextOrTrunc(bits_ptr_address);
