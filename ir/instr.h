@@ -89,6 +89,8 @@ public:
   bool propagatesPoison() const override;
   bool hasSideEffects() const override;
   void rauw(const Value &what, Value &with) override;
+  const char* getOpName() const;
+  bool isCommutative() const;
   void print(std::ostream &os) const override;
   StateValue toSMT(State &s) const override;
   smt::expr getTypeConstraints(const Function &f) const override;
@@ -155,6 +157,7 @@ public:
   bool propagatesPoison() const override;
   bool hasSideEffects() const override;
   void rauw(const Value &what, Value &with) override;
+  const char* getOpName() const;
   void print(std::ostream &os) const override;
   StateValue toSMT(State &s) const override;
   smt::expr getTypeConstraints(const Function &f) const override;
@@ -244,6 +247,7 @@ public:
   bool propagatesPoison() const override;
   bool hasSideEffects() const override;
   void rauw(const Value &what, Value &with) override;
+  const char* getOpName() const;
   void print(std::ostream &os) const override;
   StateValue toSMT(State &s) const override;
   smt::expr getTypeConstraints(const Function &f) const override;
@@ -269,6 +273,7 @@ public:
   bool propagatesPoison() const override;
   bool hasSideEffects() const override;
   void rauw(const Value &what, Value &with) override;
+  const char* getOpName() const;
   void print(std::ostream &os) const override;
   StateValue toSMT(State &s) const override;
   smt::expr getTypeConstraints(const Function &f) const override;
@@ -333,6 +338,7 @@ public:
   bool propagatesPoison() const override;
   bool hasSideEffects() const override;
   void rauw(const Value &what, Value &with) override;
+  const char* getOpName() const;
   void print(std::ostream &os) const override;
   StateValue toSMT(State &s) const override;
   smt::expr getTypeConstraints(const Function &f) const override;

@@ -29,6 +29,12 @@ if ((config::disallow_ub_exploitation = opt_disallow_ub_exploitation)) {
   config::disable_poison_input = true;
 }
 
+if (opt_uf_float) {
+  config::fp_encoding_mode = config::FpEncodingMode::UninterpretedFunctions;
+} else {
+  config::fp_encoding_mode = config::FpEncodingMode::FloatingPoint;
+}
+
 func_names.insert(opt_funcs.begin(), opt_funcs.end());
 
 if (!report_dir_created && !opt_report_dir.empty()) {

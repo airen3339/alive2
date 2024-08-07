@@ -633,21 +633,39 @@ void FpBinOp::rauw(const Value &what, Value &with) {
   RAUW(rhs);
 }
 
-void FpBinOp::print(ostream &os) const {
-  const char *str = nullptr;
+const char* FpBinOp::getOpName() const {
   switch (op) {
-  case FAdd:     str = "fadd "; break;
-  case FSub:     str = "fsub "; break;
-  case FMul:     str = "fmul "; break;
-  case FDiv:     str = "fdiv "; break;
-  case FRem:     str = "frem "; break;
-  case FMax:     str = "fmax "; break;
-  case FMin:     str = "fmin "; break;
-  case FMaximum: str = "fmaximum "; break;
-  case FMinimum: str = "fminimum "; break;
-  case CopySign: str = "copysign "; break;
+  case FAdd:     return "fadd";
+  case FSub:     return "fsub";
+  case FMul:     return "fmul";
+  case FDiv:     return "fdiv";
+  case FRem:     return "frem";
+  case FMax:     return "fmax";
+  case FMin:     return "fmin";
+  case FMaximum: return "fmaximum";
+  case FMinimum: return "fminimum";
+  case CopySign: return "copysign";
   }
-  os << getName() << " = " << str << fmath << *lhs << ", " << rhs->getName();
+  UNREACHABLE();
+}
+
+bool FpBinOp::isCommutative() const {
+  switch (op) {
+  case FAdd:
+  case FMin:
+  case FMax:
+  case FMinimum:
+  case FMaximum:
+    return true;
+  default:
+    return false;
+  }
+  UNREACHABLE();
+}
+
+void FpBinOp::print(ostream &os) const {
+  os << getName() << " = " << getOpName() << ' ' << fmath
+     << *lhs << ", " << rhs->getName();
   if (!rm.isDefault())
     os << ", rounding=" << rm;
   if (!ex.ignore())
@@ -840,6 +858,60 @@ static StateValue fm_poison(State &s, expr a, const expr &ap,
                    ty, fmath, rm, bitwise, flags_in_only, 1);
 }
 
+static StateValue uf_float(State &s, const string &name,
+                           const vector<StateValue> &args,
+                           const expr &res,
+                           FastMathFlags fmath = FastMathFlags(),
+                           bool is_commutative = false,
+                           bool is_partial = false) {
+  
+  vector<expr> arg_values;
+  arg_values.reserve(args.size());
+  for (auto &arg : args) {
+    arg_values.push_back(arg.value);
+  }
+
+  auto value = expr::mkUF(name, arg_values, res);
+  s.doesApproximation("uf_float", value);
+  if (is_commutative) {
+    // Commutative functions are encoded as
+    //   op(x, y) = op'(x, y) & op'(y, x)
+    // where & is the bitwise and operator and op' is an uninterpreted function.
+    // This encoding comes from "SMT-based Translation Validation for Machine
+    // Learning Compiler" by Seongwon Bang, Seunghyeon Nam, Inwhan Chun,
+    // Ho Young Jhoo, and Juneyoung Lee
+    assert(args.size() == 2);
+    value = value & expr::mkUF(name, {arg_values[1], arg_values[0]}, res);
+  }
+
+  AndExpr non_poison;
+  for (auto &arg : args) {
+    non_poison.add(arg.non_poison);
+  }
+
+  auto poison_condition = [&](const char* suffix) {
+    auto np_name = name + ".np_" + suffix;
+    auto poison_uf = expr::mkUF(np_name, arg_values, false);
+    s.doesApproximation("uf_float", poison_uf);
+    if (is_commutative) {
+      assert(args.size() == 2);
+      poison_uf &= expr::mkUF(np_name, {arg_values[1], arg_values[0]}, false);
+    }
+    non_poison.add(poison_uf);
+  };
+  
+  if (fmath.flags & FastMathFlags::NNaN)
+    poison_condition("nnan");
+  if (fmath.flags & FastMathFlags::NInf)
+    poison_condition("ninf");
+
+  // Partial functions may produce poison for inputs where they are not defined.
+  if (is_partial)
+    poison_condition("partial");
+
+  return { std::move(value), non_poison() };
+}
+
 StateValue FpBinOp::toSMT(State &s) const {
   function<expr(const expr&, const expr&, const expr&)> fn;
   bool bitwise = false;
@@ -914,11 +986,22 @@ StateValue FpBinOp::toSMT(State &s) const {
     break;
   }
 
-  auto scalar = [&](const auto &a, const auto &b, const Type &ty) {
+  function<StateValue(const StateValue&, const StateValue&, const Type&)> scalar =
+      [&](const StateValue &a, const StateValue &b, const Type &ty) {
     return fm_poison(s, a.value, a.non_poison, b.value, b.non_poison,
                      [&](auto &a, auto &b, auto &rm){ return fn(a, b, rm); },
                      ty, fmath, rm, bitwise);
   };
+
+  if (config::is_uf_float()) {
+    scalar = [&](const StateValue &a, const StateValue &b,
+                 const Type &ty) -> StateValue {
+      ostringstream name;
+      name << getOpName() << '.' << ty;
+      return uf_float(s, std::move(name).str(), {a, b}, a.value,
+                      fmath, isCommutative());
+    };
+  }
 
   auto &a = s[*lhs];
   auto &b = s[*rhs];
@@ -1107,23 +1190,25 @@ void FpUnaryOp::rauw(const Value &what, Value &with) {
   RAUW(val);
 }
 
-void FpUnaryOp::print(ostream &os) const {
-  const char *str = nullptr;
+const char* FpUnaryOp::getOpName() const {
   switch (op) {
-  case FAbs:         str = "fabs "; break;
-  case FNeg:         str = "fneg "; break;
-  case Canonicalize: str = "canonicalize "; break;
-  case Ceil:         str = "ceil "; break;
-  case Floor:        str = "floor "; break;
-  case RInt:         str = "rint "; break;
-  case NearbyInt:    str = "nearbyint "; break;
-  case Round:        str = "round "; break;
-  case RoundEven:    str = "roundeven "; break;
-  case Trunc:        str = "trunc "; break;
-  case Sqrt:         str = "sqrt "; break;
+  case FAbs:         return "fabs";
+  case FNeg:         return "fneg";
+  case Canonicalize: return "canonicalize";
+  case Ceil:         return "ceil";
+  case Floor:        return "floor";
+  case RInt:         return "rint";
+  case NearbyInt:    return "nearbyint";
+  case Round:        return "round";
+  case RoundEven:    return "roundeven";
+  case Trunc:        return "trunc";
+  case Sqrt:         return "sqrt";
   }
+  UNREACHABLE();
+}
 
-  os << getName() << " = " << str << fmath << *val;
+void FpUnaryOp::print(ostream &os) const {
+  os << getName() << " = " << getOpName() << ' ' << fmath << *val;
   if (!rm.isDefault())
     os << ", rounding=" << rm;
   if (!ex.ignore())
@@ -1171,11 +1256,20 @@ StateValue FpUnaryOp::toSMT(State &s) const {
     break;
   }
 
-  auto scalar = [&](const StateValue &v, const Type &ty) {
+  function<StateValue(const StateValue&, const Type&)> scalar =
+      [&](const StateValue &v, const Type &ty) {
     return fm_poison(s, v.value, v.non_poison,
                      [fn](auto &v, auto &rm) {return fn(v, rm);}, ty, fmath, rm,
                      bitwise, false);
   };
+
+  if (config::is_uf_float()) {
+    scalar = [&](const StateValue &v, const Type &ty) -> StateValue {
+      ostringstream name;
+      name << getOpName() << '.' << ty;
+      return uf_float(s, std::move(name).str(), {v}, v.value, fmath, false);
+    };
+  }
 
   auto &v = s[*val];
 
@@ -1413,14 +1507,17 @@ void FpTernaryOp::rauw(const Value &what, Value &with) {
   RAUW(c);
 }
 
-void FpTernaryOp::print(ostream &os) const {
-  const char *str = nullptr;
+const char* FpTernaryOp::getOpName() const {
   switch (op) {
-  case FMA:    str = "fma "; break;
-  case MulAdd: str = "fmuladd "; break;
+  case FMA:    return "fma";
+  case MulAdd: return "fmuladd";
   }
+  UNREACHABLE();
+}
 
-  os << getName() << " = " << str << fmath << *a << ", " << *b << ", " << *c;
+void FpTernaryOp::print(ostream &os) const {
+  os << getName() << " = " << getOpName() << ' ' << fmath
+     << *a << ", " << *b << ", " << *c;
   if (!rm.isDefault())
     os << ", rounding=" << rm;
   if (!ex.ignore())
@@ -1444,11 +1541,22 @@ StateValue FpTernaryOp::toSMT(State &s) const {
     break;
   }
 
-  auto scalar = [&](const StateValue &a, const StateValue &b,
-                    const StateValue &c, const Type &ty) {
+  function<StateValue(const StateValue&, const StateValue&,
+                      const StateValue&, const Type&)> scalar =
+    [&](const StateValue &a, const StateValue &b,
+        const StateValue &c, const Type &ty) {
     return fm_poison(s, a.value, a.non_poison, b.value, b.non_poison,
                      c.value, c.non_poison, fn, ty, fmath, rm, false);
   };
+
+  if (config::is_uf_float()) {
+    scalar = [&](const StateValue &a, const StateValue &b,
+                 const StateValue &c, const Type &ty) -> StateValue {
+      ostringstream name;
+      name << getOpName() << '.' << ty;
+      return uf_float(s, std::move(name).str(), {a, b, c}, a.value, fmath);
+    };
+  }
 
   auto &av = s[*a];
   auto &bv = s[*b];
@@ -1498,13 +1606,15 @@ void TestOp::rauw(const Value &what, Value &with) {
   RAUW(rhs);
 }
 
-void TestOp::print(ostream &os) const {
-  const char *str = nullptr;
+const char* TestOp::getOpName() const {
   switch (op) {
-  case Is_FPClass: str = "is.fpclass "; break;
+  case Is_FPClass: return "is.fpclass";
   }
+  UNREACHABLE();
+}
 
-  os << getName() << " = " << str << *lhs << ", " << *rhs;
+void TestOp::print(ostream &os) const {
+  os << getName() << " = " << getOpName() << ' ' << *lhs << ", " << *rhs;
 }
 
 StateValue TestOp::toSMT(State &s) const {
@@ -1522,9 +1632,18 @@ StateValue TestOp::toSMT(State &s) const {
     break;
   }
 
-  auto scalar = [&](const StateValue &v, const Type &ty) -> StateValue {
+  function<StateValue(const StateValue&, const Type&)> scalar =
+      [&](const StateValue &v, const Type &ty) -> StateValue {
     return { fn(v.value, ty), expr(v.non_poison) };
   };
+
+  if (config::is_uf_float()) {
+    scalar = [&](const StateValue &v, const Type &ty) -> StateValue {
+      ostringstream name;
+      name << getOpName() << '.' << ty;
+      return uf_float(s, std::move(name).str(), {v}, expr::mkUInt(0, 1));
+    };
+  }
 
   if (getType().isVectorType()) {
     vector<StateValue> vals;
@@ -1745,20 +1864,22 @@ void FpConversionOp::rauw(const Value &what, Value &with) {
   RAUW(val);
 }
 
-void FpConversionOp::print(ostream &os) const {
-  const char *str = nullptr;
+const char* FpConversionOp::getOpName() const {
   switch (op) {
-  case SIntToFP: str = "sitofp "; break;
-  case UIntToFP: str = "uitofp "; break;
-  case FPToSInt: str = "fptosi "; break;
-  case FPToUInt: str = "fptoui "; break;
-  case FPExt:    str = "fpext "; break;
-  case FPTrunc:  str = "fptrunc "; break;
-  case LRInt:    str = "lrint "; break;
-  case LRound:   str = "lround "; break;
+  case SIntToFP: return "sitofp";
+  case UIntToFP: return "uitofp";
+  case FPToSInt: return "fptosi";
+  case FPToUInt: return "fptoui";
+  case FPExt:    return "fpext";
+  case FPTrunc:  return "fptrunc";
+  case LRInt:    return "lrint";
+  case LRound:   return "lround";
   }
+  UNREACHABLE();
+}
 
-  os << getName() << " = " << str;
+void FpConversionOp::print(ostream &os) const {
+  os << getName() << " = " << getOpName() << ' ';
   if (flags & NNEG)
     os << "nneg ";
   os << *val << print_type(getType(), " to ", "");
@@ -1840,8 +1961,9 @@ StateValue FpConversionOp::toSMT(State &s) const {
     break;
   }
 
-  auto scalar = [&](const StateValue &sv, const Type &from_type,
-                    const Type &to_type) -> StateValue {
+  function<StateValue(const StateValue &, const Type &, const Type&)> scalar =
+      [&](const StateValue &sv, const Type &from_type,
+          const Type &to_type) -> StateValue {
     auto val = sv.value;
 
     if (from_type.isFloatType()) {
@@ -1864,6 +1986,21 @@ StateValue FpConversionOp::toSMT(State &s) const {
                                sv.value)
                : std::move(ret.value), np()};
   };
+
+  if (config::is_uf_float()) {
+    scalar = [&](const StateValue &sv, const Type &from_type,
+                 const Type &to_type) -> StateValue {
+      ostringstream name;
+      name << getOpName() << '.' << from_type << ".to." << to_type;
+      expr range = to_type.getDummyValue(true).value;
+      bool is_partial = (op == UIntToFP && (flags & NNEG)) ||
+                        op == FPToSInt ||
+                        op == FPToUInt;
+      
+      return uf_float(s, std::move(name).str(), {sv}, range,
+                      FastMathFlags(), false, is_partial);
+    };
+  }
 
   if (getType().isVectorType()) {
     vector<StateValue> vals;
@@ -2801,7 +2938,8 @@ StateValue FCmp::toSMT(State &s) const {
   auto &a_eval = s[*a];
   auto &b_eval = s[*b];
 
-  auto fn = [&](const auto &a, const auto &b, const Type &ty) -> StateValue {
+  function<StateValue(const StateValue &, const StateValue &, const Type &)> fn =
+      [&](const auto &a, const auto &b, const Type &ty) -> StateValue {
     auto cmp = [&](const expr &a, const expr &b, auto &rm) {
       switch (cond) {
       case OEQ: return a.foeq(b);
@@ -2826,6 +2964,53 @@ StateValue FCmp::toSMT(State &s) const {
                                cmp, ty, fmath, {}, false, true);
     return { val.toBVBool(), std::move(np) };
   };
+
+  if (config::is_uf_float()) {
+    fn = [&](const auto &a, const auto &b, const Type &ty) -> StateValue {
+      switch (cond) {
+      case TRUE:  return {true, true};
+      case FALSE: return {false, true};
+      default: {
+        // All conditions are encoded using only 5 uninterpreted functions:
+        // oeq, ueq, olt, ult, ord
+
+        StateValue lhs = a;
+        StateValue rhs = b;
+
+        const char *name = nullptr;
+        bool negate = false;
+        bool commutative = false;
+        switch (cond) {
+        case OEQ: name = "oeq"; commutative = true; break;
+        case OGT: name = "olt"; std::swap(lhs, rhs); break;
+        case OGE: name = "ult"; negate = true; break;
+        case OLT: name = "olt"; break;
+        case OLE: name = "ult"; std::swap(lhs, rhs); negate = true; break;
+        case ONE: name = "ueq"; negate = true; commutative = true; break;
+        case ORD: name = "ord"; commutative = true; break;
+        case UEQ: name = "ueq"; commutative = true; break;
+        case UGT: name = "olt"; std::swap(lhs, rhs); break;
+        case UGE: name = "ult"; negate = true; break;
+        case ULT: name = "ult"; break;
+        case ULE: name = "olt"; negate = true; std::swap(lhs, rhs); break;
+        case UNE: name = "oeq"; negate = true; commutative = true; break;
+        case UNO: name = "ord"; negate = true; commutative = true; break;
+        default: UNREACHABLE();
+        }
+
+        ostringstream os;
+        os << name << '.' << ty;
+        auto value = uf_float(s, std::move(os).str(), {lhs, rhs},
+                              expr::mkUInt(0, 1), fmath, commutative);
+
+        if (negate) {
+          value.value = ~value.value;
+        }
+        return value;
+      }
+      }
+    };
+  }
 
   if (auto agg = a->getType().getAsAggregateType()) {
     vector<StateValue> vals;
