@@ -12,14 +12,6 @@ using namespace smt;
 using namespace std;
 using namespace util;
 
-#define return_mkIf_phy(T, phy, log) \
-  auto islogical = isLogical();      \
-  if (islogical.isTrue())            \
-    return log;                      \
-  if (islogical.isFalse())           \
-    return phy;                      \
-  return T::mkIf(islogical, log, phy)
-
 static bool hasLogicalBit() {
   return true;
 }
@@ -186,7 +178,7 @@ expr Pointer::isLogical() const {
   return hasLogicalBit() ? p.sign() == 0 : true;
 }
 
-expr Pointer::isLogLocal(bool simplify) const {
+expr Pointer::isLocal(bool simplify) const {
   if (m.numLocals() == 0)
     return false;
   if (m.numNonlocals() == 0)
@@ -212,15 +204,6 @@ expr Pointer::isLogLocal(bool simplify) const {
   return local == 1;
 }
 
-expr Pointer::isLocal(bool simplify) const {
-  if (m.numLocals() == 0)
-    return false;
-  if (m.numNonlocals() == 0)
-    return true;
-
-  return toLogical().first.isLogLocal(simplify);
-}
-
 expr Pointer::isConstGlobal() const {
   auto bid = getShortBid();
   auto generic = bid.uge(has_null_block) &&
@@ -240,30 +223,18 @@ expr Pointer::isWritableGlobal() const {
          bid.ule(has_null_block + num_globals_src - 1);
 }
 
-expr Pointer::getLogBid() const {
+expr Pointer::getBid() const {
   auto start = bits_for_offset + bits_for_ptrattrs;
   return p.extract(start + bits_for_bid - 1, start);
 }
 
-expr Pointer::getLogShortBid() const {
+expr Pointer::getShortBid() const {
   auto start = bits_for_offset + bits_for_ptrattrs;
   return p.extract(start + bits_for_bid - 1 - hasLocalBit(), start);
 }
 
-expr Pointer::getLogOffset() const {
-  return p.extract(bits_for_offset + bits_for_ptrattrs - 1, bits_for_ptrattrs);
-}
-
-expr Pointer::getBid() const {
-  return toLogical().first.getLogBid();
-}
-
-expr Pointer::getShortBid() const {
-  return toLogical().first.getLogShortBid();
-}
-
 expr Pointer::getOffset() const {
-  return toLogical().first.getLogOffset();
+  return p.extract(bits_for_offset + bits_for_ptrattrs - 1, bits_for_ptrattrs);
 }
 
 expr Pointer::getOffsetSizet() const {
@@ -272,8 +243,8 @@ expr Pointer::getOffsetSizet() const {
 }
 
 expr Pointer::getShortOffset() const {
-  return toLogical().first.p.extract(bits_for_offset + bits_for_ptrattrs - 1,
-                                     bits_for_ptrattrs + zeroBitsShortOffset());
+  return p.extract(bits_for_offset + bits_for_ptrattrs - 1,
+                   bits_for_ptrattrs + zeroBitsShortOffset());
 }
 
 expr Pointer::getAttrs() const {
@@ -304,7 +275,7 @@ expr Pointer::getValue(const char *name, const FunctionExpr &local_fn,
 expr Pointer::getBlockBaseAddress(bool simplify) const {
   assert(Memory::observesAddresses());
 
-  auto bid = getLogShortBid();
+  auto bid = getShortBid();
   auto zero = expr::mkUInt(0, bits_ptr_address - hasLocalBit());
   // fast path for null ptrs
   auto non_local
@@ -317,18 +288,18 @@ expr Pointer::getBlockBaseAddress(bool simplify) const {
   if (auto local = m.local_blk_addr(bid)) {
     // Local block area is the upper half of the memory
     expr lc = hasLocalBit() ? expr::mkUInt(1, 1).concat(*local) : *local;
-    return expr::mkIf(isLogLocal(), lc, non_local);
+    return expr::mkIf(isLocal(), lc, non_local);
   } else
     return non_local;
 }
 
 expr Pointer::getLogAddress(bool simplify) const {
   return getBlockBaseAddress(simplify)
-           + getLogOffset().sextOrTrunc(bits_ptr_address);
+           + getOffset().sextOrTrunc(bits_ptr_address);
 }
 
 expr Pointer::getAddress(bool simplify) const {
-  return_mkIf_phy(expr, getPhysicalAddress(), getLogAddress(simplify));
+  return mkIf_fold(isLogical(), getPhysicalAddress(), getLogAddress(simplify));
 }
 
 expr Pointer::getPhysicalAddress() const {
@@ -354,11 +325,11 @@ Pointer Pointer::mkPointerFromNoAttrs(const Memory &m, const expr &e) {
 }
 
 Pointer Pointer::operator+(const expr &bytes) const {
-  return_mkIf_phy(Pointer,
+  return mkIf_fold(isLogical(),
     mkPhysical(m, getPhysicalAddress() + bytes.zextOrTrunc(bits_ptr_address),
                getAttrs()),
-    (Pointer{m, getLogBid(),
-             getLogOffset() + bytes.zextOrTrunc(bits_for_offset), getAttrs()}));
+    (Pointer{m, getBid(),
+             getOffset() + bytes.zextOrTrunc(bits_for_offset), getAttrs()}));
 }
 
 Pointer Pointer::operator+(unsigned bytes) const {
@@ -370,10 +341,10 @@ void Pointer::operator+=(const expr &bytes) {
 }
 
 Pointer Pointer::maskOffset(const expr &mask) const {
-  return_mkIf_phy(Pointer,
+  return mkIf_fold(isLogical(),
     mkPhysical(m, getPhysicalAddress() & mask.zextOrTrunc(bits_ptr_address),
                getAttrs()),
-    (Pointer{ m, getLogBid(),
+    (Pointer{ m, getBid(),
               ((getLogAddress() & mask.zextOrTrunc(bits_ptr_address))
                  - getBlockBaseAddress()).zextOrTrunc(bits_for_offset),
               getAttrs() }));

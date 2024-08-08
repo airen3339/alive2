@@ -73,10 +73,6 @@ public:
   smt::expr isWritableGlobal() const;
 
   // these assume the pointer is logical
-  smt::expr isLogLocal(bool simplify = true) const;
-  smt::expr getLogBid() const;
-  smt::expr getLogShortBid() const;
-  smt::expr getLogOffset() const;
   smt::expr getLogAddress(bool simplify = true) const;
 
   smt::expr getBid() const;

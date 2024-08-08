@@ -906,6 +906,10 @@ unsigned Memory::numNonlocals() const {
 }
 
 expr Memory::isBlockAlive(const expr &bid, bool local) const {
+  uint64_t bid_n;
+  if (!local && bid.isUInt(bid_n) && always_alive(bid_n))
+    return true;
+
   return
     load_bv(local ? local_block_liveness : non_local_block_liveness, bid) &&
       (!local && has_null_block && !null_is_dereferenceable ? bid != 0 : true);
@@ -969,11 +973,8 @@ bool Memory::mayalias(bool local, unsigned bid0, const expr &offset0,
   } else if (local) // allocated in another branch
     return false;
 
-  if (local || !always_alive(bid0)) {
-    if ((local ? local_block_liveness : non_local_block_liveness)
-          .extract(bid0, bid0).isZero())
-      return false;
-  }
+  if (isBlockAlive(bid, local).isFalse())
+    return false;
 
   return true;
 }
