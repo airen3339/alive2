@@ -54,8 +54,10 @@ public:
   void operator=(Pointer &&rhs) noexcept { p = std::move(rhs.p); }
 
   // returns (log-ptr, domain of inboundness)
-  std::pair<Pointer, smt::expr> findLogicalPointer(const smt::expr &addr) const;
-  std::pair<Pointer, smt::expr> toLogical() const;
+  std::pair<Pointer, smt::expr>
+    findLogicalPointer(const smt::expr &addr,
+                       const smt::expr &deref_bytes) const;
+  std::pair<Pointer, smt::expr> toLogical(const smt::expr &deref_bytes) const;
 
   static smt::expr mkLongBid(const smt::expr &short_bid, bool local);
   static smt::expr mkUndef(State &s);
@@ -107,6 +109,7 @@ public:
   smt::expr operator==(const Pointer &rhs) const;
   smt::expr operator!=(const Pointer &rhs) const;
 
+  smt::expr isOfBlock(const Pointer &block, const smt::expr &bytes) const;
   smt::expr isInboundsOf(const Pointer &block, const smt::expr &bytes) const;
   smt::expr isInboundsOf(const Pointer &block, unsigned bytes) const;
   smt::expr isInbounds(bool strict) const;

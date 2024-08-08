@@ -353,7 +353,7 @@ public:
 
   void fillPoison(const smt::expr &bid);
 
-  smt::expr ptr2int(const smt::expr &ptr) const;
+  smt::expr ptr2int(const smt::expr &ptr);
   smt::expr int2ptr(const smt::expr &val) const;
 
   std::tuple<smt::expr, Pointer, std::set<smt::expr>>

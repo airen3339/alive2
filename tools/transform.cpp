@@ -1004,7 +1004,7 @@ static void calculateAndInitConstants(Transform &t) {
   uint64_t min_global_size = UINT64_MAX;
 
   bool has_null_pointer = false;
-  bool has_int2ptr     = false;
+  has_int2ptr     = false;
   bool has_ptr2int     = false;
   has_alloca       = false;
   has_fncall       = false;

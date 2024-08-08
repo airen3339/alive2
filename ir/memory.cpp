@@ -869,11 +869,7 @@ weak_ordering Memory::MemBlock::operator<=>(const MemBlock &rhs) const {
 static set<Pointer> all_leaf_ptrs(const Memory &m, const expr &ptr) {
   set<Pointer> ptrs;
   for (auto &ptr_val : ptr.leafs()) {
-    Pointer p(m, ptr_val);
-    auto offset = p.getOffset();
-    for (auto &bid : p.getBid().leafs()) {
-      ptrs.emplace(m, bid, offset);
-    }
+    ptrs.emplace(m, ptr_val);
   }
   return ptrs;
 }
@@ -881,7 +877,7 @@ static set<Pointer> all_leaf_ptrs(const Memory &m, const expr &ptr) {
 static set<expr> extract_possible_local_bids(Memory &m, const expr &eptr) {
   set<expr> ret;
   for (auto &ptr : all_leaf_ptrs(m, eptr)) {
-    if (!ptr.isLocal().isFalse())
+    if (!ptr.isLocal().isFalse() && !ptr.isLogical().isFalse())
       ret.emplace(ptr.getShortBid());
   }
   return ret;
@@ -1005,7 +1001,7 @@ Memory::AliasSet Memory::computeAliasing(const Pointer &ptr, unsigned bytes,
     AliasSet this_alias = aliasing;
     auto is_local = p.isLocal();
     auto shortbid = p.getShortBid();
-    expr offset = p.getOffset();
+    expr offset   = p.getOffset();
     uint64_t bid;
     if (shortbid.isUInt(bid) && (!isAsmMode() || p.isInbounds(true).isTrue())) {
       if (!is_local.isFalse() && bid < sz_local)
@@ -1058,6 +1054,7 @@ end:
 void Memory::access(const Pointer &ptr, unsigned bytes, uint64_t align,
                     bool write, const
                       function<void(MemBlock&, const Pointer&, expr&&)> &fn) {
+  assert(!ptr.isLogical().isFalse());
   auto aliasing = computeAliasing(ptr, bytes, align, write);
   unsigned has_local = aliasing.numMayAlias(true);
   unsigned has_nonlocal = aliasing.numMayAlias(false);
@@ -1073,25 +1070,23 @@ void Memory::access(const Pointer &ptr, unsigned bytes, uint64_t align,
   auto sz_local = aliasing.size(true);
   auto sz_nonlocal = aliasing.size(false);
 
+#define call_fn(block, local, cond_log)                             \
+    Pointer this_ptr(*this, i, local);                              \
+    /* in asm mode, all pointers have full provenance */            \
+    bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue();    \
+                                                                    \
+    this_ptr   += do_phy ? addr - this_ptr.getAddress() : offset;   \
+                                                                    \
+    fn(block, this_ptr, is_singleton ? expr(true)                   \
+         : (do_phy ? ptr.isOfBlock(this_ptr, bytes) : (cond_log)));
+
   for (unsigned i = 0; i < sz_local; ++i) {
     if (!aliasing.mayAlias(true, i))
       continue;
 
-    Pointer this_ptr(*this, i, true);
-    expr cond_eq;
-
-    if (isAsmMode() && !ptr.isInbounds(true).isTrue()) {
-      // in asm mode, all pointers have full provenance
-      cond_eq   = ptr.isInboundsOf(this_ptr, bytes);
-      this_ptr += addr - this_ptr.getAddress();
-    } else {
-      auto n = expr::mkUInt(i, Pointer::bitsShortBid());
-      cond_eq
-        = has_local == 1 ? is_local : (bid == (has_both ? one.concat(n) : n));
-      this_ptr += offset;
-    }
-
-    fn(local_block_val[i], ptr, is_singleton ? expr(true) : std::move(cond_eq));
+    auto n = expr::mkUInt(i, Pointer::bitsShortBid());
+    call_fn(local_block_val[i], true,
+            has_local == 1 ? is_local : (bid == (has_both ? one.concat(n) : n)))
   }
 
   for (unsigned i = 0; i < sz_nonlocal; ++i) {
@@ -1103,20 +1098,9 @@ void Memory::access(const Pointer &ptr, unsigned bytes, uint64_t align,
     // If aliasing info says it can, either imprecise analysis or incorrect
     // block id encoding is happening.
     assert(!is_fncall_mem(i));
-    Pointer this_ptr(*this, i, false);
-    expr cond_eq;
 
-    if (isAsmMode() && !ptr.isInbounds(true).isTrue()) {
-      // in asm mode, all pointers have full provenance
-      cond_eq   = ptr.isInboundsOf(this_ptr, bytes);
-      this_ptr += addr - this_ptr.getAddress();
-    } else {
-      cond_eq   = has_nonlocal == 1 ? !is_local : bid == i;
-      this_ptr += offset;
-    }
-
-    fn(non_local_block_val[i], this_ptr,
-       is_singleton ? expr(true) : std::move(cond_eq));
+    call_fn(non_local_block_val[i], false,
+            has_nonlocal == 1 ? !is_local : bid == i)
   }
 }
 
@@ -2419,9 +2403,10 @@ void Memory::fillPoison(const expr &bid) {
          std::move(blksz), bits_byte / 8, {}, false);
 }
 
-expr Memory::ptr2int(const expr &ptr) const {
+expr Memory::ptr2int(const expr &ptr) {
   assert(!memory_unused() && observesAddresses());
   Pointer p(*this, ptr);
+  observesAddr(p);
   state->addUB(!p.isNocapture());
   return p.getAddress();
 }
