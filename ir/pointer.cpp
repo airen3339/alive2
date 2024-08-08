@@ -326,10 +326,11 @@ Pointer Pointer::mkPointerFromNoAttrs(const Memory &m, const expr &e) {
 
 Pointer Pointer::operator+(const expr &bytes) const {
   return mkIf_fold(isLogical(),
-    mkPhysical(m, getPhysicalAddress() + bytes.zextOrTrunc(bits_ptr_address),
-               getAttrs()),
     (Pointer{m, getBid(),
-             getOffset() + bytes.zextOrTrunc(bits_for_offset), getAttrs()}));
+             getOffset() + bytes.zextOrTrunc(bits_for_offset), getAttrs()}),
+    mkPhysical(m, getPhysicalAddress() + bytes.zextOrTrunc(bits_ptr_address),
+               getAttrs())
+    );
 }
 
 Pointer Pointer::operator+(unsigned bytes) const {
@@ -342,12 +343,13 @@ void Pointer::operator+=(const expr &bytes) {
 
 Pointer Pointer::maskOffset(const expr &mask) const {
   return mkIf_fold(isLogical(),
-    mkPhysical(m, getPhysicalAddress() & mask.zextOrTrunc(bits_ptr_address),
-               getAttrs()),
     (Pointer{ m, getBid(),
               ((getLogAddress() & mask.zextOrTrunc(bits_ptr_address))
                  - getBlockBaseAddress()).zextOrTrunc(bits_for_offset),
-              getAttrs() }));
+              getAttrs() }),
+    mkPhysical(m, getPhysicalAddress() & mask.zextOrTrunc(bits_ptr_address),
+               getAttrs())
+    );
 }
 
 expr Pointer::addNoUSOverflow(const expr &offset, bool offset_only) const {
