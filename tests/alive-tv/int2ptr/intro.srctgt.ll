@@ -1,3 +1,5 @@
+; ERROR: Value mismatch
+
 define ptr @src(ptr %0, i64 %1) {
    %3 = icmp eq i64 %1, 0
    %4 = select i1 %3, ptr null, ptr %0

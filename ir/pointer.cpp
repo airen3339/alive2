@@ -645,12 +645,12 @@ expr Pointer::refined(const Pointer &other) const {
   expr nonlocal = *this == other;
 
   return expr::mkIf(isNull(), other.isNull(),
-                    (is_asm ? expr(true) : l1 == l2) &&
+                    d1.implies(d2 &&
+                               isBlockAlive().implies(other.isBlockAlive())) &&
+                      (is_asm ? expr(true) : l1 == l2) &&
                       expr::mkIf(l1,
                                  expr::mkIf(isLocal(), local, nonlocal),
-                                 getAddress() == other.getAddress())) &&
-                      d1.implies(d2 &&
-                                 isBlockAlive().implies(other.isBlockAlive()));
+                                 getAddress() == other.getAddress()));
 }
 
 expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
@@ -692,12 +692,12 @@ expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
   expr nonlocal = *this == other;
 
   return expr::mkIf(isNull(), other.isNull(),
-                    (is_asm ? expr(true) : l1 == l2) &&
+                    d1.implies(d2 &&
+                               isBlockAlive().implies(other.isBlockAlive())) &&
+                      (is_asm ? expr(true) : l1 == l2) &&
                       expr::mkIf(l1,
                                  expr::mkIf(isLocal(), local, nonlocal),
-                                 getAddress() == other.getAddress())) &&
-                      d1.implies(d2 &&
-                                 isBlockAlive().implies(other.isBlockAlive()));
+                                 getAddress() == other.getAddress()));
 }
 
 expr Pointer::isWritable() const {
