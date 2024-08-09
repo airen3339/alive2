@@ -1292,7 +1292,7 @@ void Memory::storeLambda(const Pointer &ptr, const expr &offset,
     blk.undef.insert(undef.begin(), undef.end());
   };
 
-  access(ptr, bytes, align, true, fn);
+  access(ptr, bytes.zextOrTrunc(bits_size_t), align, true, fn);
 }
 
 static bool memory_unused() {
