@@ -191,12 +191,13 @@ class Memory {
   void mkNonlocalValAxioms(bool skip_consts) const;
 
   bool mayalias(bool local, unsigned bid, const smt::expr &offset,
-                unsigned bytes, uint64_t align, bool write) const;
+                const smt::expr &bytes, uint64_t align, bool write) const;
 
-  AliasSet computeAliasing(const Pointer &ptr, unsigned bytes, uint64_t align,
-                           bool write) const;
+  AliasSet computeAliasing(const Pointer &ptr, const smt::expr &bytes,
+                           uint64_t align, bool write) const;
 
-  void access(const Pointer &ptr, unsigned btyes, uint64_t align, bool write,
+  void access(const Pointer &ptr, const smt::expr &bytes, uint64_t align,
+              bool write,
               const std::function<void(MemBlock&, const Pointer&,
                                        smt::expr&&)> &fn);
 

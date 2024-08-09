@@ -441,7 +441,7 @@ expr Byte::refined(const Byte &other) const {
     if (asm_mode) {
       extra = !is_ptr2 &&
               other.boolNonptrNonpoison() &&
-              castPtrToInt() == v2;
+              castPtrToInt() == other.nonptrValue();
     }
     ptr_cnstr = ptrNonpoison().implies(
                   (other.ptrNonpoison() &&
@@ -912,7 +912,7 @@ expr Memory::isBlockAlive(const expr &bid, bool local) const {
 }
 
 bool Memory::mayalias(bool local, unsigned bid0, const expr &offset0,
-                      unsigned bytes, uint64_t align, bool write) const {
+                      const expr &bytes, uint64_t align, bool write) const {
   if (local && bid0 >= next_local_bid)
     return false;
 
@@ -975,10 +975,8 @@ bool Memory::mayalias(bool local, unsigned bid0, const expr &offset0,
   return true;
 }
 
-Memory::AliasSet Memory::computeAliasing(const Pointer &ptr, unsigned bytes,
+Memory::AliasSet Memory::computeAliasing(const Pointer &ptr, const expr &bytes,
                                          uint64_t align, bool write) const {
-  assert(bytes % (bits_byte/8) == 0);
-
   AliasSet aliasing(*this);
   auto sz_local = next_local_bid;
   auto sz_nonlocal = aliasing.size(false);
@@ -1051,7 +1049,7 @@ end:
   return aliasing;
 }
 
-void Memory::access(const Pointer &ptr, unsigned bytes, uint64_t align,
+void Memory::access(const Pointer &ptr, const expr &bytes, uint64_t align,
                     bool write, const
                       function<void(MemBlock&, const Pointer&, expr&&)> &fn) {
   assert(!ptr.isLogical().isFalse());
@@ -1070,15 +1068,14 @@ void Memory::access(const Pointer &ptr, unsigned bytes, uint64_t align,
   auto sz_local = aliasing.size(true);
   auto sz_nonlocal = aliasing.size(false);
 
-#define call_fn(block, local, cond_log)                             \
-    Pointer this_ptr(*this, i, local);                              \
-    /* in asm mode, all pointers have full provenance */            \
-    bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue();    \
-                                                                    \
-    this_ptr   += do_phy ? addr - this_ptr.getAddress() : offset;   \
-                                                                    \
-    fn(block, this_ptr, is_singleton ? expr(true)                   \
-         : (do_phy ? ptr.isOfBlock(this_ptr, bytes) : (cond_log)));
+#define call_fn(block, local, cond_log)                                        \
+    Pointer this_ptr(*this, i, local);                                         \
+    /* in asm mode, all pointers have full provenance */                       \
+    bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue();               \
+                                                                               \
+    fn(block, this_ptr + (do_phy ? addr - this_ptr.getAddress() : offset),     \
+       is_singleton ? expr(true)                                               \
+                    : (do_phy ? ptr.isOfBlock(this_ptr, bytes) : (cond_log)));
 
   for (unsigned i = 0; i < sz_local; ++i) {
     if (!aliasing.mayAlias(true, i))
@@ -1154,7 +1151,7 @@ vector<Byte> Memory::load(const Pointer &ptr, unsigned bytes, set<expr> &undef,
     }
   };
 
-  access(ptr, bytes, align, false, fn);
+  access(ptr, expr::mkUInt(bytes, bits_size_t), align, false, fn);
 
   vector<Byte> ret;
   for (auto &disj : loaded) {
@@ -1246,7 +1243,8 @@ void Memory::store(const Pointer &ptr,
     blk.undef.insert(undef.begin(), undef.end());
   };
 
-  access(ptr, bytes, align, !state->isInitializationPhase(), fn);
+  access(ptr, expr::mkUInt(bytes, bits_size_t), align,
+         !state->isInitializationPhase(), fn);
 }
 
 void Memory::storeLambda(const Pointer &ptr, const expr &offset,
@@ -1294,10 +1292,7 @@ void Memory::storeLambda(const Pointer &ptr, const expr &offset,
     blk.undef.insert(undef.begin(), undef.end());
   };
 
-  uint64_t size = bits_byte / 8;
-  bytes.isUInt(size);
-
-  access(ptr, size, align, true, fn);
+  access(ptr, bytes, align, true, fn);
 }
 
 static bool memory_unused() {
@@ -2383,7 +2378,7 @@ void Memory::copy(const Pointer &src, const Pointer &dst) {
     dst_blk.type |= blk.type;
     has_bv_val   |= 1u << blk.val.isBV();
   };
-  access(src, bits_byte/8, bits_byte/8, false, fn);
+  access(src, expr::mkUInt(bits_byte/8, bits_size_t), bits_byte/8, false, fn);
 
   // if we have mixed array/non-array blocks, switch them all to array
   if (has_bv_val == 3) {
