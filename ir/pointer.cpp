@@ -374,6 +374,7 @@ expr Pointer::operator!=(const Pointer &rhs) const {
 }
 
 expr Pointer::isOfBlock(const Pointer &block, const expr &bytes0) const {
+  assert(block.getOffset().isZero());
   expr bytes = bytes0.zextOrTrunc(bits_ptr_address);
   expr addr  = getAddress();
   expr block_addr = block.getAddress();
