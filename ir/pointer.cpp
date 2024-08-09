@@ -141,17 +141,29 @@ expr Pointer::mkUndef(State &s) {
     force_local    = !force_nonlocal && m.numNonlocals() == 0;
   }
 
-  unsigned var_bits = bits_for_bid + bits_for_offset
-                        - (force_local | force_nonlocal);
+  unsigned bits_phy = hasLogicalBit() * bits_ptr_address;
+  unsigned bits_log
+    = bits_for_bid + bits_for_offset - (force_local | force_nonlocal);
+  unsigned var_bits = hasLogicalBit() + max(bits_log, bits_phy);
+
   expr var = expr::mkFreshVar("undef", expr::mkUInt(0, var_bits));
-  s.addUndefVar(expr(var));
 
-  if (force_local || force_nonlocal)
-    var = mkLongBid(var, force_local);
+  expr ptr;
+  if (bits_log >= bits_phy) {
+    ptr = var.trunc(bits_log);
+    if (force_local || force_nonlocal)
+      ptr = mkLongBid(ptr, force_local);
+    if (hasLogicalBit())
+      ptr = var.sign().concat(ptr);
+  } else {
+    ptr = var;
+  }
 
-  // TODO: support undef phy pointers
-  return expr::mkUInt(0, 1 + padding_logical())
-           .concat(var).concat_zeros(bits_for_ptrattrs);
+  ptr = ptr.concat_zeros(bits_for_ptrattrs);
+
+  s.addUndefVar(std::move(var));
+  assert(ptr.bits() == totalBits());
+  return ptr;
 }
 
 unsigned Pointer::totalBits() {
