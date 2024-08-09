@@ -2507,12 +2507,15 @@ Memory::refined(const Memory &other, bool fncall,
 
   AliasSet block_alias(*this, other);
   auto min_read_sz = bits_byte / 8;
+  expr min_read_sz_expr = expr::mkUInt(min_read_sz, bits_size_t);
+
   auto sets = { make_pair(this, set_ptrs), make_pair(&other, set_ptrs2) };
   for (const auto &[mem, set] : sets) {
     if (set) {
       for (auto &it: *set_ptrs) {
         block_alias.unionWith(computeAliasing(Pointer(*mem, it.val.value),
-                                              min_read_sz, min_read_sz, false));
+                                              min_read_sz_expr, min_read_sz,
+                                              false));
       }
     } else {
       if (mem->next_nonlocal_bid > 0)
