@@ -630,27 +630,21 @@ expr Pointer::refined(const Pointer &other) const {
   auto [p2l, d2] = other.toLogical(expr::mkUInt(1, bits_size_t));
 
   // This refers to a block that was malloc'ed within the function
-  expr local = other.isLocal();
-  local &= getAllocType() == other.getAllocType();
-  local &= blockSize() == other.blockSize();
-  local &= getOffset() == other.getOffset();
+  expr local = d2 && p2l.isLocal();
+  local &= p1l.getAllocType() == p2l.getAllocType();
+  local &= p1l.blockSize() == p2l.blockSize();
+  local &= p1l.getOffset() == p2l.getOffset();
+  local &= p1l.isBlockAlive().implies(p2l.isBlockAlive());
   // Attributes are ignored at refinement.
 
   // TODO: this induces an infinite loop
   //local &= block_refined(other);
 
-  auto l1 = isLogical();
-  auto l2 = other.isLogical();
-
-  expr nonlocal = *this == other;
+  expr nonlocal = is_asm ? getAddress() == other.getAddress() : *this == other;
 
   return expr::mkIf(isNull(), other.isNull(),
-                    d1.implies(d2 &&
-                               isBlockAlive().implies(other.isBlockAlive())) &&
-                      (is_asm ? expr(true) : l1 == l2) &&
-                      expr::mkIf(l1,
-                                 expr::mkIf(isLocal(), local, nonlocal),
-                                 getAddress() == other.getAddress()));
+                    (is_asm ? expr(true) : isLogical() == other.isLogical()) &&
+                      expr::mkIf(d1 && p1l.isLocal(), local, nonlocal));
 }
 
 expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
@@ -658,18 +652,18 @@ expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
   bool is_asm = other.m.isAsmMode();
   auto [p1l, d1] = toLogical(expr::mkUInt(1, bits_size_t));
   auto [p2l, d2] = other.toLogical(expr::mkUInt(1, bits_size_t));
-  expr size = blockSizeOffsetT();
-  expr off = getOffsetSizet();
-  expr size2 = other.blockSizeOffsetT();
-  expr off2 = other.getOffsetSizet();
+  expr size = p1l.blockSizeOffsetT();
+  expr off = p1l.getOffsetSizet();
+  expr size2 = p2l.blockSizeOffsetT();
+  expr off2 = p2l.getOffsetSizet();
 
   // TODO: check block value for byval_bytes
   if (!byval_bytes.isZero())
     return true;
 
   expr local
-    = expr::mkIf(isHeapAllocated(),
-                 getAllocType() == other.getAllocType() &&
+    = expr::mkIf(p1l.isHeapAllocated(),
+                 p1l.getAllocType() == p2l.getAllocType() &&
                    off == off2 && size == size2,
 
                  expr::mkIf(off.sge(0),
@@ -681,23 +675,16 @@ expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
                                            size2.uge(size)),
                             // maintains same dereferenceability before/after
                             off == off2 && size2.uge(size)));
-  local = (other.isLocal() || other.isByval()) && local;
+  local = d2 && (p2l.isLocal() || p2l.isByval()) && local;
 
   // TODO: this induces an infinite loop
   // block_refined(other);
 
-  auto l1 = isLogical();
-  auto l2 = other.isLogical();
-
-  expr nonlocal = *this == other;
+  expr nonlocal = is_asm ? getAddress() == other.getAddress() : *this == other;
 
   return expr::mkIf(isNull(), other.isNull(),
-                    d1.implies(d2 &&
-                               isBlockAlive().implies(other.isBlockAlive())) &&
-                      (is_asm ? expr(true) : l1 == l2) &&
-                      expr::mkIf(l1,
-                                 expr::mkIf(isLocal(), local, nonlocal),
-                                 getAddress() == other.getAddress()));
+                    (is_asm ? expr(true) : isLogical() == other.isLogical()) &&
+                      expr::mkIf(d1 && p1l.isLocal(), local, nonlocal));
 }
 
 expr Pointer::isWritable() const {
