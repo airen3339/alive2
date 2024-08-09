@@ -80,8 +80,9 @@ Pointer::Pointer(const Memory &m, const expr &bid, const expr &offset,
 Pointer::Pointer(const Memory &m, const char *var_name,
                  const ParamAttrs &attr) : m(m) {
   unsigned bits = bitsShortBid() + bits_for_offset;
-  p = prepend_if(expr::mkUInt(0, 1 + padding_logical()),
-                 expr::mkVar(var_name, bits, false), hasLocalBit());
+  p = expr::mkVar(var_name, bits, false)
+        .prepend_zeros(hasLocalBit() +
+                       (1 + padding_logical()) * hasLogicalBit());
   if (bits_for_ptrattrs)
     p = p.concat(attr_to_bitvec(attr));
   assert(p.bits() == totalBits());

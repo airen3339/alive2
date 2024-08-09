@@ -315,6 +315,7 @@ public:
 
   expr concat(const expr &rhs) const;
   expr concat_zeros(unsigned bits) const;
+  expr prepend_zeros(unsigned bits) const;
   expr extract(unsigned high, unsigned low, unsigned depth = 3) const;
   expr sign() const;
 

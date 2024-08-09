@@ -1826,6 +1826,10 @@ expr expr::concat_zeros(unsigned bits) const {
   return bits ? concat(mkUInt(0, bits)) : *this;
 }
 
+expr expr::prepend_zeros(unsigned bits) const {
+  return bits ? mkUInt(0, bits).concat(*this) : *this;
+}
+
 expr expr::extract(unsigned high, unsigned low, unsigned depth) const {
   C();
   assert(high >= low && high < bits());
