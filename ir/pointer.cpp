@@ -299,7 +299,7 @@ expr Pointer::getLogAddress(bool simplify) const {
 }
 
 expr Pointer::getAddress(bool simplify) const {
-  return mkIf_fold(isLogical(), getPhysicalAddress(), getLogAddress(simplify));
+  return mkIf_fold(isLogical(), getLogAddress(simplify), getPhysicalAddress());
 }
 
 expr Pointer::getPhysicalAddress() const {
