@@ -115,6 +115,8 @@ public:
   smt::expr isInbounds(bool strict) const;
   smt::expr inbounds();
 
+  bool isInput() const;
+
   smt::expr blockAlignment() const; // log(bits)
   smt::expr isBlockAligned(uint64_t align, bool exact = false) const;
 

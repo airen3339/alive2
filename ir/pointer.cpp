@@ -443,6 +443,17 @@ expr Pointer::inbounds() {
   return *std::move(ret)();
 }
 
+bool Pointer::isInput() const {
+  expr vbid, voffset;
+  unsigned h, l;
+  return
+    isLogical().isTrue() &&
+    isLocal().isFalse() &&
+    getShortBid().isExtract(vbid, h, l) && vbid.isVar() &&
+    getOffset().isExtract(voffset, h, l) && voffset.isVar() &&
+    vbid.fn_name() == voffset.fn_name();
+}
+
 expr Pointer::blockAlignment() const {
   return getValue("blk_align", m.local_blk_align, m.non_local_blk_align,
                    expr::mkUInt(0, 6), true);
@@ -527,7 +538,7 @@ Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
 
     if (isUndef(offset) || isUndef(p.getBid())) {
       cond = false;
-    } else if (m.state->isAsmMode()) {
+    } else if (m.state->isAsmMode() && !p.isInput()) {
       // Pointers have full provenance in ASM mode
       auto check = [&](unsigned limit, bool local) {
         for (unsigned i = 0; i != limit; ++i) {
@@ -792,7 +803,6 @@ bool Pointer::isBlkSingleByte() const {
 pair<Pointer, expr> Pointer::findLogicalPointer(const expr &addr,
                                                 const expr &deref_bytes) const {
   DisjointExpr<Pointer> ret;
-  expr val = addr.zextOrTrunc(bits_ptr_address);
 
   auto add = [&](unsigned limit, bool local) {
     for (unsigned i = 0; i != limit; ++i) {
@@ -804,16 +814,17 @@ pair<Pointer, expr> Pointer::findLogicalPointer(const expr &addr,
       expr size = p.blockSize();
 
       if (deref_bytes.eq(size)) {
-        ret.add(std::move(p), p.getAddress() == val);
+        ret.add(std::move(p), p.getLogAddress() == addr);
         continue;
       }
       if (deref_bytes.ugt(size).isTrue())
         continue;
 
-      ret.add(p + (val - p.getAddress()),
+      ret.add(p + (addr - p.getLogAddress()),
               !local && i == 0 && has_null_block
-                ? val == 0
-                : val.uge(p.getAddress()) && val.ult((p + size).getAddress()));
+                ? addr == 0
+                : addr.uge(p.getLogAddress()) &&
+                    addr.ult((p + size).getLogAddress()));
     }
   };
   add(m.numLocals(), true);
@@ -840,12 +851,12 @@ pair<Pointer, expr> Pointer::toLogical(const expr &deref_bytes) const {
   }
 
   if (!leftover.empty()) {
-    auto [ptr, domain]
-      = findLogicalPointer(*std::move(leftover)(), deref_bytes);
+    expr addr = Pointer(m, *std::move(leftover)()).getPhysicalAddress();
+    auto [ptr, domain] = findLogicalPointer(addr, deref_bytes);
     ret.add(std::move(ptr), leftover.domain() && domain);
   }
 
-  return { *std::move(ret)(), ret.domain() };
+  return { Pointer::mkIf(isLogical(), *this, *std::move(ret)()), ret.domain() };
 }
 
 Pointer
@@ -866,10 +877,11 @@ ostream& operator<<(ostream &os, const Pointer &p) {
   else                 \
     os << field
 
-  os << (logical.isFalse() ? "phy-ptr(" : "pointer(");
-
-  bool needs_comma = false;
-  if (!logical.isFalse()) {
+  if (logical.isFalse()) {
+    os << "phy-ptr(addr=";
+    P(p.getPhysicalAddress(), printUnsigned);
+  } else {
+    os << "pointer(";
     if (p.isLocal().isConst())
       os << (p.isLocal().isTrue() ? "local" : "non-local");
     else
@@ -879,14 +891,6 @@ ostream& operator<<(ostream &os, const Pointer &p) {
 
     os << ", offset=";
     P(p.getOffset(), printSigned);
-    needs_comma = true;
-  }
-  if (auto addr = p.getPhysicalAddress();
-      addr.isConst() || logical.isFalse()) {
-    if (needs_comma)
-      os << ", ";
-    os << "address=";
-    P(addr, printUnsigned);
   }
 
   if (bits_for_ptrattrs && !p.getAttrs().isZero()) {

@@ -1068,11 +1068,12 @@ void Memory::access(const Pointer &ptr, const expr &bytes, uint64_t align,
   auto sz_local = aliasing.size(true);
   auto sz_nonlocal = aliasing.size(false);
 
+  // In asm mode, all pointers have full provenance
+  // But relax this condition and assume input ptrs are inbounds
+  bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue() && !ptr.isInput();
+
 #define call_fn(block, local, cond_log)                                        \
     Pointer this_ptr(*this, i, local);                                         \
-    /* in asm mode, all pointers have full provenance */                       \
-    bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue();               \
-                                                                               \
     fn(block, this_ptr + (do_phy ? addr - this_ptr.getAddress() : offset),     \
        is_singleton ? expr(true)                                               \
                     : (do_phy ? ptr.isOfBlock(this_ptr, bytes) : (cond_log)));
