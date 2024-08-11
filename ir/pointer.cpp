@@ -443,17 +443,6 @@ expr Pointer::inbounds() {
   return *std::move(ret)();
 }
 
-bool Pointer::isInput() const {
-  expr vbid, voffset;
-  unsigned h, l;
-  return
-    isLogical().isTrue() &&
-    isLocal().isFalse() &&
-    getShortBid().isExtract(vbid, h, l) && vbid.isVar() &&
-    getOffset().isExtract(voffset, h, l) && voffset.isVar() &&
-    vbid.fn_name() == voffset.fn_name();
-}
-
 expr Pointer::blockAlignment() const {
   return getValue("blk_align", m.local_blk_align, m.non_local_blk_align,
                    expr::mkUInt(0, 6), true);
@@ -538,7 +527,7 @@ Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
 
     if (isUndef(offset) || isUndef(p.getBid())) {
       cond = false;
-    } else if (m.state->isAsmMode() && !p.isInput()) {
+    } else if (m.state->isAsmMode()) {
       // Pointers have full provenance in ASM mode
       auto check = [&](unsigned limit, bool local) {
         for (unsigned i = 0; i != limit; ++i) {

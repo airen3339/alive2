@@ -1069,8 +1069,7 @@ void Memory::access(const Pointer &ptr, const expr &bytes, uint64_t align,
   auto sz_nonlocal = aliasing.size(false);
 
   // In asm mode, all pointers have full provenance
-  // But relax this condition and assume input ptrs are inbounds
-  bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue() && !ptr.isInput();
+  bool do_phy = isAsmMode() && !ptr.isInbounds(true).isTrue();
 
 #define call_fn(block, local, cond_log)                                        \
     Pointer this_ptr(*this, i, local);                                         \
